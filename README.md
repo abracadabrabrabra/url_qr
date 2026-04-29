@@ -101,6 +101,10 @@ curl -X POST "http://localhost:8000/api/shorten" \
   }'
 ```
 
+```cmd
+curl -X POST "http://localhost:8000/api/shorten" -H "Content-Type: application/json" -d "{\"original_url\": \"https://example.com/very/long/url\"}"
+```
+
 Пример ответа:
 
 ```json
@@ -160,6 +164,36 @@ curl "http://localhost:8000/api/health"
 }
 ```
 
+### Генерация простого qr по короткому коду
+
+```cmd
+curl "http://localhost:8000/api/qr/example_correct_shortcode" --output output_filepath --fail
+```
+
+Ожидаемый ответ:
+
+```text
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   736    0   736    0     0   9156      0 --:--:-- --:--:-- --:--:--  9200
+
+```
+
+### Ошибка при несуществующем или неактивном коде
+
+```cmd
+curl "http://localhost:8000/api/qr/example_incorrect_shortcode" --output output_filepath --fail
+```
+
+Ожидаемый ответ:
+
+```text
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
+curl: (22) The requested URL returned error: 404
+```
+
 ## Как работает генерация `short_code`
 
 В `services.py` код генерируется случайно:
@@ -181,6 +215,14 @@ curl "http://localhost:8000/api/health"
 
 В проекте для этого используется цикл с ограничением по числу попыток. Дополнительно на `commit` обрабатывается `IntegrityError`, чтобы закрыть гонку между параллельными запросами.
 
+## Генерация qr-кодов
+
+Для генерации qr-кодов используется библиотека segno. Её преимущества:
+
+- высокая производительность
+- минимальные зависимости - не требует дополнительных библиотек
+- встроенная цветовая кастомизация
+
 ## Основные файлы
 
 - `main.py` создает приложение FastAPI и подключает роутеры
@@ -191,3 +233,4 @@ curl "http://localhost:8000/api/health"
 - `Dockerfile` собирает контейнер приложения
 - `services.py` содержит бизнес-логику создания короткой ссылки
 - `routers/links.py` содержит HTTP-эндпоинты
+- `qr_generator.py` содержит модульные функции для генерации qr-кодов(простых, с логотипом, с кастомными цветами)

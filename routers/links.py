@@ -20,7 +20,7 @@ class LinkResponse(BaseModel):
 
 
 @router.post(
-    "/shorten",
+    "/api/shorten",
     response_model=LinkResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a short URL",

@@ -1,0 +1,25 @@
+# This workflow helps you trigger analysis of your code
+# and run any kinds of configured tasks inside Sfera application
+
+# Sfera actions format version
+version: 1.0.0
+
+# List of configured actions
+# All attributes are mandatory to run an action
+actions:
+  # Unique key of your action
+  - id: 1
+
+    # Displayed name of your action
+    name: "Sample Action"
+
+    # Full path to the action runner
+    # Full path to resource (works only with tag Jump)
+    # jump_url: "https://sfera.host/your_link"
+    url: "https://sfera.host/app/orchestration/api/static/api/v1/projects/aaaaaaaa-1111-1111-aaaa-aaaaaaaaaaaa/run"
+
+    # List of tags with possible values
+    # JobCICD - This is CICD pipeline
+    # Jump - After performing an action redirect to URL configured under jump_url
+    tags:
+      - JobCICD

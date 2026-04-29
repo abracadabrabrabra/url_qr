@@ -20,8 +20,9 @@
 
 ## Что реализовано
 
-- `POST /shorten` создает короткую ссылку
+- `POST /api/shorten` создает короткую ссылку
 - `GET /{code}` делает redirect на исходный URL
+- `GET /api/health` проверяет доступность сервиса
 - хранение ссылок в PostgreSQL
 - генерация уникального `short_code` длиной 6 символов
 
@@ -93,7 +94,7 @@ http://localhost:8000/docs
 ### Создание короткой ссылки
 
 ```bash
-curl -X POST "http://localhost:8000/shorten" \
+curl -X POST "http://localhost:8000/api/shorten" \
   -H "Content-Type: application/json" \
   -d '{
     "original_url": "https://example.com/very/long/url"
@@ -143,6 +144,20 @@ content-length: 33
 content-type: application/json
 
 {"detail":"Short code not found"}
+```
+
+### Проверка доступности сервиса
+
+```bash
+curl "http://localhost:8000/api/health"
+```
+
+Ожидаемый ответ:
+
+```json
+{
+  "status": "ok"
+}
 ```
 
 ## Как работает генерация `short_code`

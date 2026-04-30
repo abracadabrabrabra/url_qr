@@ -9,12 +9,17 @@
 ├── link_shortener.sql
 ├── main.py
 ├── models.py
+├── qr_generator.py
 ├── requirements.txt
 ├── README.md
 ├── routers
 │   ├── __init__.py
 │   └── links.py
+├── static_data
+│   ├── bauman_logo.png
+│   └── logo.png
 ├── services.py
+├── .gitignore
 └── .env
 ```
 
@@ -22,10 +27,11 @@
 
 - `POST /api/shorten` создает короткую ссылку
 - `GET /{code}` делает redirect на исходный URL
+- `POST /api/qr/{code}/custom` - генерация qr-кода для существующей короткой ссылки
 - `GET /api/health` проверяет доступность сервиса
 - хранение ссылок в PostgreSQL
 - генерация уникального `short_code` длиной 6 символов
-
+- кастомизация qr-кодов (загрузка пользовательских логотипов и цветов)
 
 ## Настройка окружения
 
@@ -164,34 +170,116 @@ curl "http://localhost:8000/api/health"
 }
 ```
 
-### Генерация простого qr по короткому коду
+### Генерация черно-белого qr по короткому коду
 
 ```cmd
-curl "http://localhost:8000/api/qr/example_correct_shortcode" --output output_filepath --fail
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" --output filepath --fail
 ```
 
-Ожидаемый ответ:
+### Генерация цветного qr по короткому коду
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" ^
+-F "dark_color=#FF0000" ^
+-F "light_color=#FFFFFF" ^
+--output qr_default.png --fail
+```
+
+### Генерация черно-белого qr-кода со стандартным логотипом
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" ^
+-F "use_default_logo=true" ^
+--output qr_default.png --fail
+```
+
+### Генерация черно-белого qr-кода с кастомным логотипом
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" ^
+-F "logo_file=@C:\logo_path.png" ^
+--output qr_default.png --fail
+```
+
+### Генерация цветного qr-кода со стандартным логотипом
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" ^
+-F "use_default_logo=true" ^
+-F "dark_color=#FF0000" ^
+-F "light_color=#FFFFFF" ^
+-F "scale=15" ^
+--output qr_default.png --fail
+```
+
+### Генерация цветного qr-кода с кастомным логотипом
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" ^
+-F "logo_file=@C:\logo_path.png" ^
+-F "dark_color=#FF0000" ^
+-F "light_color=#FFFFFF" ^
+-F "scale=15" ^
+--output qr_default.png --fail
+```
+
+Ожидаемый ответ для всех запросов на генерацию qr-кодов:
 
 ```text
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
-100   736    0   736    0     0   9156      0 --:--:-- --:--:-- --:--:--  9200
+100   818    0   754  100    64   9299    789 --:--:-- --:--:-- --:--:-- 10098
 
 ```
 
-### Ошибка при несуществующем или неактивном коде
+### Ошибка при несуществующем или неактивном коде для всех запросов на генерацию qr-кодов
 
 ```cmd
-curl "http://localhost:8000/api/qr/example_incorrect_shortcode" --output output_filepath --fail
+curl -X POST "http://localhost:8000/api/qr/example_invalid_short_code/custom" --output qr_default.png --fail
 ```
 
-Ожидаемый ответ:
+Ответ:
 
 ```text
   % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
                                  Dload  Upload   Total   Spent    Left  Speed
   0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0
 curl: (22) The requested URL returned error: 404
+```
+
+### Ошибка при некорректном формате цветов
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" ^
+-F "dark_color=FF0000A123fs" ^
+-F "light_color=#*90" ^
+--output qr_default.png --fail
+```
+
+Ответ:
+
+```text
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   281    0     0  100   281      0   6585 --:--:-- --:--:-- --:--:--  6690
+curl: (22) The requested URL returned error: 400
+```
+
+### Ошибка при некорректном формате файла с логотипом(допустимы: .jpg, .jpeg, .png)
+
+```cmd
+curl -X POST "http://localhost:8000/api/qr/GAS7Li/custom" ^
+-F "logo_file=@C:\invalid_file.sql" ^
+--output qr_default.png --fail
+```
+
+Ответ:
+
+```text
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100   281    0     0  100   281      0   6585 --:--:-- --:--:-- --:--:--  6690
+curl: (22) The requested URL returned error: 400
 ```
 
 ## Как работает генерация `short_code`
@@ -233,4 +321,5 @@ curl: (22) The requested URL returned error: 404
 - `Dockerfile` собирает контейнер приложения
 - `services.py` содержит бизнес-логику создания короткой ссылки
 - `routers/links.py` содержит HTTP-эндпоинты
-- `qr_generator.py` содержит модульные функции для генерации qr-кодов(простых, с логотипом, с кастомными цветами)
+- `qr_generator.py` содержит функции для генерации qr-кодов(простых, с кастомными цветами) и для наложения логотипа
+- `static_data/logo.png` стандартный логотип, накладываемый на qr-коды

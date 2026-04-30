@@ -27,7 +27,8 @@
 
 - `POST /api/shorten` создает короткую ссылку
 - `GET /{code}` делает redirect на исходный URL
-- `POST /api/qr/{code}/custom` - генерация qr-кода для существующей короткой ссылки
+- `GET /api/qr/{code}` - генерация черно-белого qr-кода для существующей короткой ссылки
+- `POST /api/qr/{code}/custom` - генерация кастомного qr-кода для существующей короткой ссылки
 - `GET /api/health` проверяет доступность сервиса
 - хранение ссылок в PostgreSQL
 - генерация уникального `short_code` длиной 6 символов
@@ -174,6 +175,10 @@ curl "http://localhost:8000/api/health"
 
 ```cmd
 curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" --output filepath --fail
+```
+
+```cmd
+curl "http://localhost:8000/api/qr/example_short_code" --output filepath --fail
 ```
 
 ### Генерация цветного qr по короткому коду

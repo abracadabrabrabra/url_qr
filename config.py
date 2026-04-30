@@ -11,10 +11,15 @@ class Settings(BaseSettings):
     short_code_length: int = 6
     short_code_alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_db: str = "url_shortener"
+    postgres_port: int = 5432
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,
+        case_sensitive=False
     )
 
 

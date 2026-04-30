@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
 from models import Link
+from fastapi import HTTPException, status
 
 settings = get_settings()
 
@@ -46,3 +47,15 @@ async def create_short_link(session: AsyncSession, original_url: str) -> Link:
                 await session.rollback()
 
     raise RuntimeError("Failed to generate a unique short code after multiple attempts.")
+
+
+async def get_active_link_or_404(session: AsyncSession, code: str) -> Link:
+    link = await get_link_by_code(session, code)
+
+    if link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Short code not found"
+        )
+
+    return link

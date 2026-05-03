@@ -129,6 +129,27 @@ async def get_custom_qr_for_short_url(
         headers={"Content-Disposition": f"inline; filename=qr_{code}_custom.png"}
     )
 
+@router.get(
+    "/api/qr/{code}",
+    summary="Get QR code for existing short URL",
+    responses={
+        200: {"description": "QR code image", "content": {"image/png": {}}},
+        404: {"description": "Short code not found"}
+    }
+)
+async def get_qr_for_short_url(
+        code: str,
+        scale: int = Query(10, ge=3, le=20, description="QR code size (3-20)"),
+        session: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    link = await get_active_link_or_404(session, code)
+    qr_bytes = generate_simple_qr(link.original_url, scale=scale)
+
+    return StreamingResponse(
+        io.BytesIO(qr_bytes),
+        media_type="image/png",
+        headers={"Content-Disposition": f"inline; filename=qr_{code}.png"}
+    )
 
 @router.get(
     "/{code}",

@@ -14,18 +14,28 @@
 ├── README.md
 ├── routers
 │   ├── __init__.py
+│   ├── auth.py
 │   └── links.py
 ├── static_data
 │   ├── bauman_logo.png
 │   └── logo.png
 ├── services.py
+├── auth_services.py
 ├── .gitignore
 └── .env
 ```
 
 ## Что реализовано
-
-- `POST /api/shorten` создает короткую ссылку
+- `POST /api/auth/register` - регистрация нового пользователя
+- `POST /api/auth/login` - авторизация (генерация refresh и access токенов)
+- `POST /api/auth/refresh` - обновление acess токена
+- `POST /api/auth/logout` - завершение сессии (отзыв refresh токена)
+- `POST /api/auth/logout-all` - завершение всех сессий (отзыв всех refresh токенов)
+- `GET /api/auth/protected` - тестовый защищённый эндпоинт
+- `POST /api/shorten` - создает короткую ссылку
+- `POST /api/shorten/protected` - защищённый эндпоинт создания ссылки
+- `GET /api/links/{code}/stats` - статистика переходов по короткой ссылке
+- `GET /api/links` - список коротких ссылок пользователя
 - `GET /{code}` делает redirect на исходный URL
 - `GET /api/qr/{code}` - генерация черно-белого qr-кода для существующей короткой ссылки
 - `POST /api/qr/{code}/custom` - генерация кастомного qr-кода для существующей короткой ссылки
@@ -98,7 +108,84 @@ http://localhost:8000/docs
 
 ## Примеры запросов
 
+### Регистрация нового пользователя
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/register" ^
+ -H "Content-Type: application/json" ^
+ -d "{\"email\": \"example@mail.com\", \"password\": \"123\"}"
+```
+
+Пример ответа:
+
+```json
+{"msg":"User created successfully","user_id":1,"email":"example@mail.com"}
+```
+
+### Авторизация
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/login" ^
+ -H "Content-Type: application/x-www-form-urlencoded" ^
+ -d "username=example@mail.com&password=123"
+```
+
+Пример ответа:
+
+```json
+{"access_token":"<access_token>","refresh_token":"<refresh_token>","token_type":"bearer"}
+```
+
+### Обновление access токена
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/refresh" ^
+ -H "Content-Type: application/json" ^
+ -d "{\"refresh_token\": \"<refresh_token>\"}"
+```
+
+Пример ответа:
+
+```json
+{"access_token":"<access_token>","refresh_token":"<refresh_token>","token_type":"bearer"}
+```
+
+Ошибка при невалидном refresh токене:
+
+```json
+{"detail":"Invalid or expired refresh token"}
+```
+
+
+### Завершение сессии
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/logout" ^
+ -H "Content-Type: application/json" ^
+ -d "{\"refresh_token\": \"<refresh_token>\"}"
+```
+
+Пример ответа:
+
+```json
+{"msg":"Successfully logged out"}
+```
+
+### Завершение всех сессий
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/logout-all" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{"msg":"Successfully logged out from all 2 devices"}
+```
+
 ### Создание короткой ссылки
+
+Публичная версия
 
 ```bash
 curl -X POST "http://localhost:8000/api/shorten" \
@@ -109,7 +196,9 @@ curl -X POST "http://localhost:8000/api/shorten" \
 ```
 
 ```cmd
-curl -X POST "http://localhost:8000/api/shorten" -H "Content-Type: application/json" -d "{\"original_url\": \"https://example.com/very/long/url\"}"
+curl -X POST "http://localhost:8000/api/shorten" ^
+ -H "Content-Type: application/json" ^
+ -d "{\"original_url\": \"https://example.com/very/long/url\"}"
 ```
 
 Пример ответа:
@@ -121,6 +210,91 @@ curl -X POST "http://localhost:8000/api/shorten" -H "Content-Type: application/j
   "short_url": "http://localhost:8000/Ab3dE1"
 }
 ```
+
+Защищенная версия
+
+```cmd
+curl -X POST "http://localhost:8000/api/shorten/protected" ^
+ -H "Content-Type: application/json" -H "Authorization: Bearer <access_token>" ^
+ -d "{\"original_url\": \"example_url\"}"
+```
+
+Пример ответа:
+
+```json
+{
+  "original_url":"example_url",
+  "short_code":"nXiI0r",
+  "short_url":"http://localhost:8000/nXiI0r",
+  "user_id":1
+}
+
+```
+Ошибка при невалидном access токене:
+
+```json
+{"detail":"Invalid authentication credentials"}
+```
+
+### Тестовый защищенный эндпоинт
+
+Пример запроса
+
+```cmd
+curl -X GET "http://localhost:8000/api/auth/protected" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{
+  "message":"Hello example@mail.com, you have access to protected data!",
+  "user_id":1,"email":"example@mail.com",
+  "is_active":true,
+  "created_at":"2026-05-20 15:00:26.318913"
+}
+```
+
+### Список коротких ссылок пользователя
+
+Пример запроса
+
+```cmd
+curl -X GET "http://localhost:8000/api/user/links" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+[
+  {
+    "original_url":"example_url",
+    "short_code":"nXiI0r",
+    "short_url":"http://localhost:8000/nXiI0r",
+    "user_id":1
+  }
+]
+```
+
+### Статистика по короткой ссылке
+
+Пример запроса
+
+```cmd
+curl -X GET "http://localhost:8000/api/links/short_code/stats" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{
+  "short_key":"nXiI0r",
+  "clicks_count":2,
+  "created_at":"2026-05-20 14:29:03.033408",
+  "is_active":true
+}
+```
+
 
 ### Редирект по короткому коду
 
@@ -325,6 +499,8 @@ curl: (22) The requested URL returned error: 400
 - `docker-compose.yml` поднимает приложение и PostgreSQL в контейнерах
 - `Dockerfile` собирает контейнер приложения
 - `services.py` содержит бизнес-логику создания короткой ссылки
+- `auth_services.py` содержит логику работы с JWT токенами (создание, отзыв, хэширование и т.д.)
 - `routers/links.py` содержит HTTP-эндпоинты
+- `routers/auth.py` содержит HTTP-эндпоинты авторизации
 - `qr_generator.py` содержит функции для генерации qr-кодов(простых, с кастомными цветами) и для наложения логотипа
 - `static_data/logo.png` стандартный логотип, накладываемый на qr-коды

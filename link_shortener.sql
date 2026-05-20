@@ -35,6 +35,22 @@ CREATE TABLE visits (
 CREATE INDEX idx_visits_short_key ON visits(short_key);
 CREATE INDEX idx_visits_visited_at ON visits(visited_at);
 
+CREATE TABLE refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash VARCHAR(255) NOT NULL UNIQUE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMP NOT NULL,
+    revoked BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    last_used_at TIMESTAMP,
+    user_agent TEXT,
+    ip_address VARCHAR(50)
+);
+
+CREATE  INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE   INDEX idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
+CREATE   INDEX idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
+
 CREATE OR REPLACE FUNCTION update_link_status()
 RETURNS TRIGGER AS $$
 BEGIN

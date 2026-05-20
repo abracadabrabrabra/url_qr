@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import get_settings
 from models import Link
 from fastapi import HTTPException, status
+from typing import Optional
 
 settings = get_settings()
 
@@ -28,7 +29,11 @@ async def get_link_by_code(session: AsyncSession, code: str) -> Link | None:
     return result.scalar_one_or_none()
 
 
-async def create_short_link(session: AsyncSession, original_url: str) -> Link:
+async def create_short_link(
+        session: AsyncSession,
+        original_url: str,
+        user_id: Optional[int] = None) -> Link:
+
     max_attempts = 10
 
     for _ in range(max_attempts):
@@ -36,7 +41,11 @@ async def create_short_link(session: AsyncSession, original_url: str) -> Link:
         existing_link = await get_link_by_code(session, short_code)
 
         if existing_link is None:
-            link = Link(original_url=original_url, short_key=short_code)
+            link = Link(
+                original_url=original_url,
+                short_key=short_code,
+                user_id=user_id
+            )
             session.add(link)
 
             try:

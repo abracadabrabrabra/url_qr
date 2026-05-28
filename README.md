@@ -268,10 +268,13 @@ curl -X GET "http://localhost:8000/api/user/links" -H "Authorization: Bearer <ac
 ```json
 [
   {
-    "original_url":"example_url",
-    "short_code":"nXiI0r",
-    "short_url":"http://localhost:8000/nXiI0r",
-    "user_id":1
+    "original_url":"https://very_long_url",
+    "short_code":"6GjDtf",
+    "short_url":"http://localhost:8000/6GjDtf",
+    "user_id":1,
+    "clicks_count":1,
+    "created_at":"2026-05-28 08:36:47.579602",
+    "is_active":true
   }
 ]
 ```

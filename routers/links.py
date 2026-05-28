@@ -32,6 +32,15 @@ class LinkResponse(BaseModel):
     short_url: str
     user_id: Optional[int] = None
 
+class LinkStatsResponse(BaseModel):
+    original_url: str
+    short_code: str
+    short_url: str
+    user_id: Optional[int] = None
+    clicks_count: int
+    created_at: str
+    is_active: bool
+
 class QRColorRequest(BaseModel):
     dark_color: str = "#000000"
     light_color: str = "#FFFFFF"
@@ -115,9 +124,8 @@ async def get_link_stats_private(
 
 @router.get(
     "/api/user/links",
-    response_model=list[LinkResponse],
-    summary="Get all links for current user",
-    description="Returns all active links created by the authenticated user",
+    response_model=list[LinkStatsResponse],
+    summary="Get all links for current user with statistics",
 )
 async def get_user_links(
         request: Request,
@@ -139,11 +147,14 @@ async def get_user_links(
     base_url = str(request.base_url).rstrip("/")
 
     return [
-        LinkResponse(
+        LinkStatsResponse(
             original_url=link.original_url,
             short_code=link.short_key,
             short_url=f"{base_url}/{link.short_key}",
-            user_id=link.user_id
+            user_id=link.user_id,
+            clicks_count=link.clicks_count,
+            created_at=str(link.created_at),
+            is_active=link.is_active
         )
         for link in links
     ]

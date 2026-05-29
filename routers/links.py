@@ -3,6 +3,9 @@ from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi import File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, update, delete, select, desc
+from sqlalchemy import func
+from datetime import datetime
 from typing import Optional
 import io
 import os
@@ -12,6 +15,9 @@ from fastapi import Form
 from database import get_db
 from services import create_short_link, get_link_by_code, get_active_link_or_404
 from qr_generator import generate_simple_qr, generate_custom_color_qr, add_logo_to_qr, generate_qr_with_custom_params
+from routers.auth import get_current_user
+from models import User, Link
+
 
 router = APIRouter(tags=["links"])
 
@@ -24,6 +30,16 @@ class LinkResponse(BaseModel):
     original_url: str
     short_code: str
     short_url: str
+    user_id: Optional[int] = None
+
+class LinkStatsResponse(BaseModel):
+    original_url: str
+    short_code: str
+    short_url: str
+    user_id: Optional[int] = None
+    clicks_count: int
+    created_at: str
+    is_active: bool
 
 class QRColorRequest(BaseModel):
     dark_color: str = "#000000"
@@ -48,7 +64,101 @@ async def shorten_url(
         original_url=link.original_url,
         short_code=link.short_key,
         short_url=short_url,
+        user_id=link.user_id
     )
+
+@router.post(
+    "/api/shorten/protected",
+    response_model=LinkResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a short URL (authenticated, linked to user)",
+)
+async def shorten_url_protected(
+        payload: LinkCreate,
+        request: Request,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db),
+) -> LinkResponse:
+    link = await create_short_link(
+        session,
+        str(payload.original_url),
+        user_id=current_user.id
+    )
+    short_url = str(request.base_url).rstrip("/") + f"/{link.short_key}"
+
+    return LinkResponse(
+        original_url=link.original_url,
+        short_code=link.short_key,
+        short_url=short_url,
+        user_id=link.user_id
+    )
+
+
+@router.get(
+    "/api/links/{short_key}/stats",
+    summary="Get full statistics for a short link (owner only)",
+)
+async def get_link_stats_private(
+        short_key: str,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db),
+):
+    link = await get_link_by_code(session, short_key)
+
+    if not link:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short code not found")
+
+    if link.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to view statistics for this link"
+        )
+
+    return {
+        "short_key": link.short_key,
+        "clicks_count": link.clicks_count,
+        "created_at": str(link.created_at),
+        "is_active": link.is_active
+    }
+
+
+@router.get(
+    "/api/user/links",
+    response_model=list[LinkStatsResponse],
+    summary="Get all links for current user with statistics",
+)
+async def get_user_links(
+        request: Request,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db),
+        skip: int = Query(0, ge=0, description="Number of links to skip"),
+        limit: int = Query(100, ge=1, le=1000, description="Maximum number of links to return"),
+        include_inactive: bool = Query(False, description="Include inactive/deleted links"),
+):
+    query = select(Link).where(Link.user_id == current_user.id)
+    if not include_inactive:
+        query = query.where(
+            Link.is_active == True,
+            Link.deleted_at.is_(None)
+        )
+    query = query.order_by(desc(Link.created_at)).offset(skip).limit(limit)
+    result = await session.execute(query)
+    links = result.scalars().all()
+    base_url = str(request.base_url).rstrip("/")
+
+    return [
+        LinkStatsResponse(
+            original_url=link.original_url,
+            short_code=link.short_key,
+            short_url=f"{base_url}/{link.short_key}",
+            user_id=link.user_id,
+            clicks_count=link.clicks_count,
+            created_at=str(link.created_at),
+            is_active=link.is_active
+        )
+        for link in links
+    ]
+
 
 @router.post(
     "/api/qr/{code}/custom",
@@ -151,6 +261,7 @@ async def get_qr_for_short_url(
         headers={"Content-Disposition": f"inline; filename=qr_{code}.png"}
     )
 
+
 @router.get(
     "/{code}",
     summary="Redirect by short code",
@@ -158,6 +269,7 @@ async def get_qr_for_short_url(
 )
 async def redirect_to_original(
         code: str,
+        request: Request,
         session: AsyncSession = Depends(get_db),
 ):
     if code.startswith("api/"):
@@ -167,5 +279,25 @@ async def redirect_to_original(
 
     if link is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short code not found")
+
+    if not link.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This short link has been deactivated"
+        )
+
+    if link.expires_at and link.expires_at < datetime.utcnow():
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="This short link has expired"
+        )
+
+    link.clicks_count += 1
+
+    await session.commit()
+
+    #TODO: add record to visits table
+
+    print(f"Redirect: {code} -> {link.original_url} (clicks: {link.clicks_count})")
 
     return RedirectResponse(url=link.original_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)

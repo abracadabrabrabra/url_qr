@@ -1,5 +1,5 @@
 from functools import lru_cache
-
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,14 +7,19 @@ class Settings(BaseSettings):
     app_name: str = "URL Shortener API"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/url_shortener"
+    database_url: str = Field(..., env="DATABASE_URL")
     short_code_length: int = 6
     short_code_alphabet: str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
-    postgres_user: str = "postgres"
-    postgres_password: str = "postgres"
-    postgres_db: str = "url_shortener"
-    postgres_port: int = 5432
+    postgres_user: str = Field(..., env="POSTGRES_USER")
+    postgres_password: str = Field(..., env="POSTGRES_PASSWORD")
+    postgres_db: str = Field(..., env="POSTGRES_DB")
+    postgres_port: int = Field(5432, env="POSTGRES_PORT")
+
+    jwt_key: str = Field(..., env="JWT_KEY")
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 7
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -48,8 +48,23 @@ CREATE TABLE refresh_tokens (
 );
 
 CREATE  INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
-CREATE   INDEX idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
-CREATE   INDEX idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
+CREATE  INDEX idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
+CREATE  INDEX idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
+
+CREATE TABLE password_reset_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    token_hash VARCHAR(255) NOT NULL UNIQUE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMP NOT NULL,
+    used BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    ip_address VARCHAR(45),
+    user_agent TEXT
+);
+
+CREATE INDEX idx_reset_tokens_user_id ON password_reset_tokens(user_id);
+CREATE INDEX idx_reset_tokens_token_hash ON password_reset_tokens(token_hash);
+CREATE INDEX idx_reset_tokens_expires_at ON password_reset_tokens(expires_at);
 
 CREATE OR REPLACE FUNCTION update_link_status()
 RETURNS TRIGGER AS $$

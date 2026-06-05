@@ -4,12 +4,98 @@ from passlib.context import CryptContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, update, delete, select
 from config import get_settings
-from models import RefreshToken, User
+from models import RefreshToken, PasswordResetToken, User
 import hashlib
+import secrets
+from datetime import datetime, timedelta
 
 
 settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+async def create_password_reset_token(
+        session: AsyncSession,
+        user: User,
+        ip_address: str = None,
+        user_agent: str = None
+) -> str:
+    reset_code = ''.join(secrets.choice('0123456789') for _ in range(6))
+    token_hash = hash_token(reset_code)
+    expires_at = datetime.utcnow() + timedelta(minutes=15)
+
+    await session.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used == False,
+            PasswordResetToken.expires_at > datetime.utcnow()
+        )
+        .values(used=True)
+    )
+
+    token = PasswordResetToken(
+        token_hash=token_hash,
+        user_id=user.id,
+        expires_at=expires_at,
+        used=False,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    session.add(token)
+    await session.commit()
+
+    return reset_code
+
+
+async def validate_reset_code(
+        session: AsyncSession,
+        email: str,
+        code: str
+) -> User | None:
+    token_hash = hash_token(code)
+
+    result = await session.execute(
+        select(PasswordResetToken, User)
+        .join(User, PasswordResetToken.user_id == User.id)
+        .where(
+            PasswordResetToken.token_hash == token_hash,
+            PasswordResetToken.used == False,
+            PasswordResetToken.expires_at > datetime.utcnow(),
+            User.email == email,
+            User.is_active == True
+        )
+    )
+
+    row = result.first()
+    if row:
+        row.PasswordResetToken.used = True
+        await session.commit()
+        return row.User
+
+    return None
+
+
+async def change_password(
+        session: AsyncSession,
+        user: User,
+        new_password: str
+) -> bool:
+    user.password_hash = get_password_hash(new_password)
+
+    await revoke_all_user_tokens(session, user.id)
+    await session.commit()
+    return True
+
+
+async def cleanup_expired_reset_tokens(session: AsyncSession) -> int:
+    result = await session.execute(
+        delete(PasswordResetToken).where(
+            PasswordResetToken.expires_at <= datetime.utcnow()
+        )
+    )
+    await session.commit()
+    return result.rowcount
 
 
 def hash_token(token: str) -> str:
@@ -121,16 +207,16 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 def get_password_hash(password: str) -> str:
-    print(f"DEBUG: password type = {type(password)}")
-    print(f"DEBUG: password value = {password}")
-    print(f"DEBUG: password length = {len(password) if password else 0}")
+    #print(f"DEBUG: password type = {type(password)}")
+    #print(f"DEBUG: password value = {password}")
+    #print(f"DEBUG: password length = {len(password) if password else 0}")
 
     if not password:
         raise ValueError("Password cannot be empty")
 
     if len(password) > 72:
         password = password[:72]
-        print(f"DEBUG: Password truncated to 72 bytes")
+        #print(f"DEBUG: Password truncated to 72 bytes")
 
     return pwd_context.hash(password)
 

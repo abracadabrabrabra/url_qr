@@ -9,9 +9,10 @@ from auth_services import cleanup_expired_tokens
 
 async def cleanup_expired_tokens_job():
     async with AsyncSessionLocal() as session:
-        count = await cleanup_expired_tokens(session)
-        if count:
-            print(f"Cleaned up {count} expired refresh tokens")
+        count_tokens = await cleanup_expired_tokens(session)
+        count_reset = await cleanup_expired_reset_tokens(session)
+        if count_tokens or count_reset:
+            print(f"Cleaned up {count_tokens} refresh tokens and {count_reset} reset tokens")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

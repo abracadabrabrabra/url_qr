@@ -21,6 +21,7 @@
 │   └── logo.png
 ├── services.py
 ├── auth_services.py
+├── email_utils.py
 ├── .gitignore
 └── .env
 ```
@@ -28,9 +29,12 @@
 ## Что реализовано
 - `POST /api/auth/register` - регистрация нового пользователя
 - `POST /api/auth/login` - авторизация (генерация refresh и access токенов)
-- `POST /api/auth/refresh` - обновление acess токена
+- `POST /api/auth/refresh` - обновление access токена
 - `POST /api/auth/logout` - завершение сессии (отзыв refresh токена)
 - `POST /api/auth/logout-all` - завершение всех сессий (отзыв всех refresh токенов)
+- `POST /api/auth/forgot-password` - запрос сброса пароля
+- `POST /api/auth/reset-password` - сброс пароля по коду
+- `POST /api/auth/change-password`- защищённый эндпоинт смены пароля
 - `GET /api/auth/protected` - тестовый защищённый эндпоинт
 - `POST /api/shorten` - создает короткую ссылку
 - `POST /api/shorten/protected` - защищённый эндпоинт создания ссылки
@@ -52,13 +56,19 @@
 APP_NAME=URL Shortener API
 APP_HOST=0.0.0.0
 APP_PORT=8000
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=url_shortener
+POSTGRES_USER=your_user
+POSTGRES_PASSWORD=your_password
+POSTGRES_DB=your_db
 POSTGRES_PORT=5432
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/url_shortener
+DATABASE_URL=postgresql+asyncpg://your_user:your_password@localhost:5432/your_db
 SHORT_CODE_LENGTH=6
 SHORT_CODE_ALPHABET=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789
+JWT_KEY=your_jwt_secret_key_here_generate_new_one
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your_email@gmail.com
+SMTP_PASSWORD=your_app_password
+SMTP_FROM=noreply@yourservice.com
 ```
 
 ## Запуск через Docker
@@ -181,6 +191,60 @@ curl -X POST "http://localhost:8000/api/auth/logout-all" -H "Authorization: Bear
 
 ```json
 {"msg":"Successfully logged out from all 2 devices"}
+```
+
+### Запрос на сброс пароля с отправкой кода на email
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/forgot-password"  ^
+ -H "Content-Type: application/json" ^
+ -d "{\"email\": \"example@mail.com\"}"
+```
+
+Пример ответа:
+
+```json
+{"msg":"If your email is registered, you will receive a reset code"}
+```
+
+### Смена пароля по коду с email
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/reset-password" ^
+ -H "Content-Type: application/json" ^
+ -d "{\"email\": \"example@mail.com\", \"code\": \"123456\", \"new_password\": \"newpass\"}"
+```
+
+Успешный сценарий:
+
+```json
+{"msg":"Password has been reset successfully"}
+```
+
+Ответ при невалидном коде:
+
+```json
+{"detail":"Invalid or expired reset code"}
+```
+
+### Защищённый эндроинт смены пароля
+
+```cmd
+curl -X POST "http://localhost:8000/api/auth/change-password" -H "Content-Type: application/json" ^
+ -H "Authorization: Bearer <access_token>" ^
+ -d "{\"old_password\": \"oldpass\", \"new_password\": \"newpass\"}"
+```
+
+Успешный сценарий:
+
+```json
+{"msg":"Password has been reset successfully"}
+```
+
+Ответ при невалидном access-токене:
+
+```json
+{"detail":"Not authenticated"}
 ```
 
 ### Создание короткой ссылки

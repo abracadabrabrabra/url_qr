@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     postgres_db: str = Field(..., env="POSTGRES_DB")
     postgres_port: int = Field(5432, env="POSTGRES_PORT")
 
+    smtp_host: str = Field(..., env="SMTP_HOST")
+    smtp_port: int = Field(587, env="SMTP_PORT")
+    smtp_user: str = Field(..., env="SMTP_USER")
+    smtp_password: str = Field(..., env="SMTP_PASSWORD")
+    smtp_from: str = Field(..., env="SMTP_FROM")
+
     jwt_key: str = Field(..., env="JWT_KEY")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30

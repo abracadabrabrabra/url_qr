@@ -224,11 +224,6 @@ async def record_visit_background(
         referer: str | None,
 ) -> None:
     async with AsyncSessionLocal() as session:
-        await session.execute(
-            update(Link)
-            .where(Link.short_key == short_key, Link.is_active == True)
-            .values(clicks_count=Link.clicks_count + 1)
-        )
         session.add(
             Visit(
                 short_key=short_key,
@@ -313,9 +308,13 @@ async def get_link_stats_private(
             detail="You don't have permission to view statistics for this link"
         )
 
+    clicks_result = await session.execute(
+        select(func.count(Visit.id)).where(Visit.short_key == link.short_key)
+    )
+
     return {
         "short_key": link.short_key,
-        "clicks_count": link.clicks_count,
+        "clicks_count": int(clicks_result.scalar_one()),
         "created_at": str(link.created_at),
         "is_active": link.is_active
     }
@@ -454,12 +453,16 @@ async def get_user_stats(
     )
 
     links_result = await session.execute(
-        select(
-            func.count(Link.short_key),
-            func.coalesce(func.sum(Link.clicks_count), 0),
-        ).where(*active_user_links_filter)
+        select(func.count(Link.short_key)).where(*active_user_links_filter)
     )
-    total_links, total_clicks = links_result.one()
+    total_links = links_result.scalar_one()
+
+    clicks_result = await session.execute(
+        select(func.count(Visit.id))
+        .join(Link, Visit.short_key == Link.short_key)
+        .where(*active_user_links_filter)
+    )
+    total_clicks = clicks_result.scalar_one()
 
     now = datetime.utcnow()
     today_start = datetime(now.year, now.month, now.day)
@@ -497,15 +500,26 @@ async def get_user_links(
         limit: int = Query(100, ge=1, le=1000, description="Maximum number of links to return"),
         include_inactive: bool = Query(False, description="Include inactive/deleted links"),
 ):
-    query = select(Link).where(Link.user_id == current_user.id)
+    conditions = [Link.user_id == current_user.id]
     if not include_inactive:
-        query = query.where(
+        conditions.extend((
             Link.is_active == True,
             Link.deleted_at.is_(None)
-        )
-    query = query.order_by(desc(Link.created_at)).offset(skip).limit(limit)
-    result = await session.execute(query)
-    links = result.scalars().all()
+        ))
+    clicks_count_subquery = (
+        select(func.count(Visit.id))
+        .where(Visit.short_key == Link.short_key)
+        .correlate(Link)
+        .scalar_subquery()
+    )
+    result = await session.execute(
+        select(Link, clicks_count_subquery.label("clicks_count"))
+        .where(*conditions)
+        .order_by(desc(Link.created_at))
+        .offset(skip)
+        .limit(limit)
+    )
+    links_with_clicks = result.all()
     base_url = str(request.base_url).rstrip("/")
 
     return [
@@ -514,11 +528,11 @@ async def get_user_links(
             short_code=link.short_key,
             short_url=f"{base_url}/{link.short_key}",
             user_id=link.user_id,
-            clicks_count=link.clicks_count,
+            clicks_count=int(clicks_count),
             created_at=str(link.created_at),
             is_active=link.is_active
         )
-        for link in links
+        for link, clicks_count in links_with_clicks
     ]
 
 
@@ -561,7 +575,7 @@ async def update_user_link(
             user_id=link.user_id,
             created_at=link.created_at,
             expires_at=link.expires_at,
-            clicks_count=link.clicks_count,
+            clicks_count=0,
             is_active=link.is_active,
             deleted_at=link.deleted_at,
         )
@@ -576,6 +590,9 @@ async def update_user_link(
 
     updated_result = await session.execute(select(Link).where(Link.short_key == new_short_key))
     updated_link = updated_result.scalar_one()
+    clicks_result = await session.execute(
+        select(func.count(Visit.id)).where(Visit.short_key == new_short_key)
+    )
 
     base_url = str(request.base_url).rstrip("/")
     return LinkUpdateResponse(
@@ -583,7 +600,7 @@ async def update_user_link(
         short_key=updated_link.short_key,
         short_url=f"{base_url}/{updated_link.short_key}",
         original_url=updated_link.original_url,
-        clicks_count=updated_link.clicks_count,
+        clicks_count=int(clicks_result.scalar_one()),
         created_at=updated_link.created_at.isoformat(),
         is_active=updated_link.is_active,
     )

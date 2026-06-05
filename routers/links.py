@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status, Query
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi import File, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, update, delete, select, desc, cast, String
+from sqlalchemy import and_, update, delete, insert, select, desc, cast, String
 from sqlalchemy import func
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -12,8 +12,8 @@ import os
 import tempfile
 from fastapi import Form
 
-from database import get_db
-from services import create_short_link, get_link_by_code, get_active_link_or_404
+from database import AsyncSessionLocal, get_db
+from services import create_short_link, generate_short_code, get_link_by_code, get_active_link_or_404
 from qr_generator import generate_simple_qr, generate_custom_color_qr, add_logo_to_qr, generate_qr_with_custom_params
 from routers.auth import get_current_user
 from models import User, Link, Visit
@@ -74,6 +74,23 @@ class LinkAnalyticsResponse(BaseModel):
     comparison: AnalyticsComparisonResponse
 
 
+class LinkDeleteResponse(BaseModel):
+    msg: str
+    short_key: str
+    is_active: bool
+    deleted_at: str | None
+
+
+class LinkUpdateResponse(BaseModel):
+    old_short_key: str
+    short_key: str
+    short_url: str
+    original_url: str
+    clicks_count: int
+    created_at: str
+    is_active: bool
+
+
 class QRColorRequest(BaseModel):
     dark_color: str = "#000000"
     light_color: str = "#FFFFFF"
@@ -131,6 +148,43 @@ def calculate_percent_change(current: int, previous: int) -> int:
         return 0 if current == 0 else 100
 
     return round(((current - previous) / previous) * 100)
+
+
+async def generate_unique_short_key(session: AsyncSession) -> str:
+    max_attempts = 10
+    for _ in range(max_attempts):
+        short_key = generate_short_code()
+        result = await session.execute(select(Link).where(Link.short_key == short_key))
+        if result.scalar_one_or_none() is None:
+            return short_key
+
+    raise RuntimeError("Failed to generate a unique short code after multiple attempts.")
+
+
+async def record_visit_background(
+        short_key: str,
+        ip_address: str | None,
+        user_agent: str | None,
+        referer: str | None,
+) -> None:
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(Link)
+            .where(Link.short_key == short_key, Link.is_active == True)
+            .values(clicks_count=Link.clicks_count + 1)
+        )
+        session.add(
+            Visit(
+                short_key=short_key,
+                visited_at=datetime.utcnow(),
+                ip_address=ip_address,
+                user_agent=user_agent,
+                referer=referer,
+                device_type=detect_device_type(user_agent),
+                browser=detect_browser(user_agent),
+            )
+        )
+        await session.commit()
 
 
 @router.post(
@@ -410,6 +464,116 @@ async def get_user_links(
     ]
 
 
+@router.patch(
+    "/api/links/{short_key}",
+    response_model=LinkUpdateResponse,
+    summary="Regenerate a short code without losing statistics (owner only)",
+)
+async def update_user_link(
+        short_key: str,
+        request: Request,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db),
+) -> LinkUpdateResponse:
+    result = await session.execute(select(Link).where(Link.short_key == short_key))
+    link = result.scalar_one_or_none()
+
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short code not found")
+
+    if link.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this link",
+        )
+
+    if not link.is_active or link.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Deleted or inactive links cannot be updated",
+        )
+
+    old_short_key = link.short_key
+    new_short_key = await generate_unique_short_key(session)
+
+    await session.execute(
+        insert(Link).values(
+            short_key=new_short_key,
+            original_url=link.original_url,
+            user_id=link.user_id,
+            created_at=link.created_at,
+            expires_at=link.expires_at,
+            clicks_count=link.clicks_count,
+            is_active=link.is_active,
+            deleted_at=link.deleted_at,
+        )
+    )
+    await session.execute(
+        update(Visit)
+        .where(Visit.short_key == old_short_key)
+        .values(short_key=new_short_key)
+    )
+    await session.execute(delete(Link).where(Link.short_key == old_short_key))
+    await session.commit()
+
+    updated_result = await session.execute(select(Link).where(Link.short_key == new_short_key))
+    updated_link = updated_result.scalar_one()
+
+    base_url = str(request.base_url).rstrip("/")
+    return LinkUpdateResponse(
+        old_short_key=old_short_key,
+        short_key=updated_link.short_key,
+        short_url=f"{base_url}/{updated_link.short_key}",
+        original_url=updated_link.original_url,
+        clicks_count=updated_link.clicks_count,
+        created_at=updated_link.created_at.isoformat(),
+        is_active=updated_link.is_active,
+    )
+
+
+@router.delete(
+    "/api/links/{short_key}",
+    response_model=LinkDeleteResponse,
+    summary="Soft delete a short link (owner only)",
+)
+async def delete_user_link(
+        short_key: str,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db),
+) -> LinkDeleteResponse:
+    result = await session.execute(select(Link).where(Link.short_key == short_key))
+    link = result.scalar_one_or_none()
+
+    if link is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short code not found")
+
+    if link.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to delete this link",
+        )
+
+    if not link.is_active and link.deleted_at is not None:
+        return LinkDeleteResponse(
+            msg="Link already deleted",
+            short_key=link.short_key,
+            is_active=link.is_active,
+            deleted_at=link.deleted_at.isoformat(),
+        )
+
+    link.is_active = False
+    link.deleted_at = datetime.utcnow()
+    await session.commit()
+    await session.refresh(link)
+
+    return LinkDeleteResponse(
+        msg="Link deleted successfully",
+        short_key=link.short_key,
+        is_active=link.is_active,
+        deleted_at=link.deleted_at.isoformat() if link.deleted_at else None,
+    )
+
+
 @router.post(
     "/api/qr/{code}/custom",
     summary="Generate QR with all options (colors, logo)"
@@ -520,6 +684,7 @@ async def get_qr_for_short_url(
 async def redirect_to_original(
         code: str,
         request: Request,
+        background_tasks: BackgroundTasks,
         session: AsyncSession = Depends(get_db),
 ):
     if code.startswith("api/"):
@@ -543,21 +708,14 @@ async def redirect_to_original(
         )
 
     user_agent = request.headers.get("user-agent")
-    link.clicks_count += 1
-    session.add(
-        Visit(
-            short_key=link.short_key,
-            visited_at=datetime.utcnow(),
-            ip_address=get_client_ip(request),
-            user_agent=user_agent,
-            referer=request.headers.get("referer"),
-            device_type=detect_device_type(user_agent),
-            browser=detect_browser(user_agent),
-        )
+    background_tasks.add_task(
+        record_visit_background,
+        link.short_key,
+        get_client_ip(request),
+        user_agent,
+        request.headers.get("referer"),
     )
 
-    await session.commit()
-
-    print(f"Redirect: {code} -> {link.original_url} (clicks: {link.clicks_count})")
+    print(f"Redirect: {code} -> {link.original_url}")
 
     return RedirectResponse(url=link.original_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)

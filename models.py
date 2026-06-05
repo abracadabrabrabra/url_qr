@@ -7,6 +7,26 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
 
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        Index('idx_reset_tokens_user_id', 'user_id'),
+        Index('idx_reset_tokens_token_hash', 'token_hash'),
+        Index('idx_reset_tokens_expires_at', 'expires_at'),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="reset_tokens")
+
+
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
     __table_args__ = (
@@ -37,7 +57,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), server_default=func.now(), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true", nullable=False)
 
-    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan")
+    reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan")
 
 
 class Link(Base):

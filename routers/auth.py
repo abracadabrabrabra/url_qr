@@ -1,14 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from fastapi import BackgroundTasks
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from database import get_db
 from auth_services import authenticate_user, create_access_token, create_refresh_token, decode_token, get_password_hash
 from auth_services import hash_token, save_refresh_token, validate_refresh_token, revoke_refresh_token, revoke_all_user_tokens
 from auth_services import update_token_last_used, cleanup_expired_tokens
-from models import RefreshToken, User
+from auth_services import create_password_reset_token, validate_reset_code, change_password
+from auth_services import cleanup_expired_reset_tokens, verify_password
+from models import User, RefreshToken, PasswordResetToken
 from config import get_settings
+from email_utils import send_reset_code_email
 from typing import Dict, Any
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.exc import IntegrityError
@@ -22,13 +26,145 @@ class UserCreate(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    code: str
+    new_password: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+async def get_current_user(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        session: AsyncSession = Depends(get_db)
+) -> User:
+    token = credentials.credentials
+    payload = decode_token(token)
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token type"
+        )
+
+    email = payload.get("sub")
+    if email is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload"
+        )
+
+    result = await session.execute(select(User).where(User.email == email))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is disabled"
+        )
+
+    return user
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+        background_tasks: BackgroundTasks,
+        request: Request,
+        data: ForgotPasswordRequest,
+        session: AsyncSession = Depends(get_db)
+):
+    result = await session.execute(
+        select(User).where(User.email == data.email, User.is_active == True)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        return {"msg": "If your email is registered, you will receive a reset code"}
+
+    reset_code = await create_password_reset_token(
+        session,
+        user,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent")
+    )
+
+    background_tasks.add_task(send_reset_code_email, user.email, reset_code)
+
+    # print(f"DEBUG: Reset code for {user.email}: {reset_code}")
+    return {"msg": "If your email is registered, you will receive a reset code"}
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+        data: ResetPasswordRequest,
+        session: AsyncSession = Depends(get_db)
+):
+    if len(data.new_password) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 3 characters"
+        )
+
+    user = await validate_reset_code(session, data.email, data.code)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code"
+        )
+
+    await change_password(session, user, data.new_password)
+
+    return {"msg": "Password has been reset successfully"}
+
+
+@router.post("/change-password")
+async def change_password_authenticated(
+        data: ChangePasswordRequest,
+        current_user: User = Depends(get_current_user),
+        session: AsyncSession = Depends(get_db)
+):
+    if not verify_password(data.old_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect current password"
+        )
+
+    if len(data.new_password) < 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 3 characters"
+        )
+
+    await change_password(session, current_user, data.new_password)
+
+    return {"msg": "Password changed successfully"}
+
+
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
         user_data: UserCreate,
         session: AsyncSession = Depends(get_db)
 ):
     try:
-        print(f"DEBUG: Trying to register user {user_data.email}")
+        #print(f"DEBUG: Trying to register user {user_data.email}")
 
         result = await session.execute(
             select(User).where(User.email == user_data.email)
@@ -42,7 +178,7 @@ async def register(
             )
 
         hashed_password = get_password_hash(user_data.password)
-        print(f"DEBUG: Password hashed successfully")
+        #print(f"DEBUG: Password hashed successfully")
 
         new_user = User(
             email=user_data.email,
@@ -51,13 +187,13 @@ async def register(
         )
 
         session.add(new_user)
-        print(f"DEBUG: User added to session, attempting commit...")
+        #print(f"DEBUG: User added to session, attempting commit...")
 
         await session.commit()
-        print(f"DEBUG: Commit successful")
+        #print(f"DEBUG: Commit successful")
 
         await session.refresh(new_user)
-        print(f"DEBUG: User refreshed, id = {new_user.id}")
+        #print(f"DEBUG: User refreshed, id = {new_user.id}")
 
         return {
             "msg": "User created successfully",
@@ -67,14 +203,14 @@ async def register(
 
     except IntegrityError as e:
         await session.rollback()
-        print(f"DEBUG: IntegrityError: {e}")
+        #print(f"DEBUG: IntegrityError: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Database error: could not create user"
         )
     except Exception as e:
         await session.rollback()
-        print(f"DEBUG: Unexpected error: {type(e).__name__}: {e}")
+        #print(f"DEBUG: Unexpected error: {type(e).__name__}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Internal server error: {str(e)}"
@@ -184,50 +320,6 @@ async def logout(
 
     response.delete_cookie("refresh_token")
     return {"msg": "Successfully logged out"}
-
-
-async def get_current_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
-        session: AsyncSession = Depends(get_db)
-) -> User:
-    token = credentials.credentials
-    payload = decode_token(token)
-
-    if payload is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token type"
-        )
-
-    email = payload.get("sub")
-    if email is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload"
-        )
-
-    result = await session.execute(select(User).where(User.email == email))
-    user = result.scalar_one_or_none()
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found"
-        )
-
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is disabled"
-        )
-
-    return user
 
 
 @router.post("/logout-all")

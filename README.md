@@ -35,7 +35,9 @@
 - `POST /api/shorten` - создает короткую ссылку
 - `POST /api/shorten/protected` - защищённый эндпоинт создания ссылки
 - `GET /api/links/{code}/stats` - статистика переходов по короткой ссылке
+- `GET /api/links/{code}/analytics` - детальная аналитика по короткой ссылке за период
 - `GET /api/links` - список коротких ссылок пользователя
+- `GET /api/user/stats` - агрегированная статистика пользователя для dashboard
 - `GET /{code}` делает redirect на исходный URL
 - `GET /api/qr/{code}` - генерация черно-белого qr-кода для существующей короткой ссылки
 - `POST /api/qr/{code}/custom` - генерация кастомного qr-кода для существующей короткой ссылки
@@ -279,6 +281,25 @@ curl -X GET "http://localhost:8000/api/user/links" -H "Authorization: Bearer <ac
 ]
 ```
 
+### Агрегированная статистика пользователя
+
+Пример запроса
+
+```cmd
+curl -X GET "http://localhost:8000/api/user/stats" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{
+  "total_links":24,
+  "total_clicks":1456,
+  "clicks_today":23,
+  "clicks_this_month":312
+}
+```
+
 ### Статистика по короткой ссылке
 
 Пример запроса
@@ -295,6 +316,51 @@ curl -X GET "http://localhost:8000/api/links/short_code/stats" -H "Authorization
   "clicks_count":2,
   "created_at":"2026-05-20 14:29:03.033408",
   "is_active":true
+}
+```
+
+### Детальная аналитика по короткой ссылке
+
+Возвращает аналитику за выбранный период. Параметры `date_from` и `date_to` передаются в формате `YYYY-MM-DD`.
+
+Уникальный клик считается по паре `ip_address + user_agent`.
+
+Поле `comparison` показывает изменение в процентах относительно предыдущего периода такой же длины. Например, для периода `2026-05-12` - `2026-05-18` сравнение будет с `2026-05-05` - `2026-05-11`.
+
+Пример запроса
+
+```cmd
+curl -X GET "http://localhost:8000/api/links/nXiI0r/analytics?date_from=2026-05-12&date_to=2026-05-18" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{
+  "short_key":"nXiI0r",
+  "short_url":"http://localhost:8000/nXiI0r",
+  "original_url":"https://example.com",
+  "total_clicks":342,
+  "unique_clicks":287,
+  "average_per_day":48,
+  "last_click_at":"2026-05-18T14:32:00",
+  "created_at":"2026-05-20T14:29:03",
+  "is_active":true,
+  "daily_clicks":[
+    {
+      "date":"2026-05-12",
+      "clicks":27
+    },
+    {
+      "date":"2026-05-13",
+      "clicks":42
+    }
+  ],
+  "comparison":{
+    "total_clicks_percent":18,
+    "unique_clicks_percent":15,
+    "average_per_day_percent":12
+  }
 }
 ```
 

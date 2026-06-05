@@ -284,20 +284,39 @@ curl -X POST "http://localhost:8000/api/shorten" ^
 ```cmd
 curl -X POST "http://localhost:8000/api/shorten/protected" ^
  -H "Content-Type: application/json" -H "Authorization: Bearer <access_token>" ^
- -d "{\"original_url\": \"example_url\"}"
+ -d "{\"original_url\": \"https://example.com/very/long/url\"}"
 ```
 
 Пример ответа:
 
 ```json
 {
-  "original_url":"example_url",
+  "original_url":"https://example.com/very/long/url",
   "short_code":"nXiI0r",
   "short_url":"http://localhost:8000/nXiI0r",
   "user_id":1
 }
 
 ```
+Валидация `original_url`:
+- URL должен быть валидным и содержать схему и домен
+- разрешены только схемы `http` и `https`
+- домен обязателен и должен быть полноценным, например `example.com`; значения вроде `https://123` или `https://test` не принимаются
+
+Примеры ошибок:
+
+```json
+{"detail":"URL must be valid and include scheme and host"}
+```
+
+```json
+{"detail":"Only http and https URLs are allowed"}
+```
+
+```json
+{"detail":"URL host must be a valid domain"}
+```
+
 Ошибка при невалидном access токене:
 
 ```json

@@ -42,6 +42,8 @@
 - `GET /api/links/{code}/analytics` - детальная аналитика по короткой ссылке за период
 - `GET /api/links` - список коротких ссылок пользователя
 - `GET /api/user/stats` - агрегированная статистика пользователя для dashboard
+- `PATCH /api/links/{code}` - генерация нового короткого кода без потери статистики
+- `DELETE /api/links/{code}` - мягкое удаление короткой ссылки пользователя
 - `GET /{code}` делает redirect на исходный URL
 - `GET /api/qr/{code}` - генерация черно-белого qr-кода для существующей короткой ссылки
 - `POST /api/qr/{code}/custom` - генерация кастомного qr-кода для существующей короткой ссылки
@@ -343,6 +345,54 @@ curl -X GET "http://localhost:8000/api/user/links" -H "Authorization: Bearer <ac
     "is_active":true
   }
 ]
+```
+
+### Обновление короткого кода ссылки
+
+Эндпоинт генерирует новый короткий код для существующей ссылки без потери статистики. Пользователь не передает свой вариант `short_key`: новый код создается сервером тем же алгоритмом, что и при создании ссылки.
+
+`original_url`, `clicks_count`, `created_at` и история переходов из `visits` сохраняются.
+
+Пример запроса
+
+```cmd
+curl -X PATCH "http://localhost:8000/api/links/nXiI0r" ^
+ -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{
+  "old_short_key":"nXiI0r",
+  "short_key":"Ab3dE1",
+  "short_url":"http://localhost:8000/Ab3dE1",
+  "original_url":"https://example.com",
+  "clicks_count":342,
+  "created_at":"2026-05-20T14:29:03",
+  "is_active":true
+}
+```
+
+### Удаление короткой ссылки
+
+Эндпоинт выполняет мягкое удаление: ссылка остается в базе данных, но получает `is_active=false` и `deleted_at`, поэтому скрывается из обычного списка `/api/user/links` и перестает работать для редиректа.
+
+Пример запроса
+
+```cmd
+curl -X DELETE "http://localhost:8000/api/links/nXiI0r" -H "Authorization: Bearer <access_token>"
+```
+
+Пример ответа:
+
+```json
+{
+  "msg":"Link deleted successfully",
+  "short_key":"nXiI0r",
+  "is_active":false,
+  "deleted_at":"2026-06-05T12:30:00"
+}
 ```
 
 ### Агрегированная статистика пользователя

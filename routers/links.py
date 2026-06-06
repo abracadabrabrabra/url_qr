@@ -18,9 +18,12 @@ from services import create_short_link, generate_short_code, get_link_by_code, g
 from qr_generator import generate_simple_qr, generate_custom_color_qr, add_logo_to_qr, generate_qr_with_custom_params
 from routers.auth import get_current_user
 from models import User, Link, Visit
+from config import get_settings
 
 
 router = APIRouter(tags=["links"])
+
+settings = get_settings()
 
 
 class LinkCreate(BaseModel):
@@ -763,23 +766,29 @@ async def redirect_to_original(
         session: AsyncSession = Depends(get_db),
 ):
     if code.startswith("api/"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid short code")
+        return RedirectResponse(
+            url=f"{settings.frontend_url}/404",
+            status_code=status.HTTP_302_FOUND
+        )
 
     link = await get_link_by_code(session, code)
 
     if link is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short code not found")
+        return RedirectResponse(
+            url=f"{settings.frontend_url}/404",
+            status_code=status.HTTP_302_FOUND
+        )
 
     if not link.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="This short link has been deactivated"
+        return RedirectResponse(
+            url=f"{settings.frontend_url}/404",
+            status_code=status.HTTP_302_FOUND
         )
 
     if link.expires_at and link.expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="This short link has expired"
+        return RedirectResponse(
+            url=f"{settings.frontend_url}/404",
+            status_code=status.HTTP_302_FOUND
         )
 
     user_agent = request.headers.get("user-agent")

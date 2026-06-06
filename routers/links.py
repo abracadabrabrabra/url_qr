@@ -7,6 +7,7 @@ from sqlalchemy import and_, update, delete, insert, select, desc, cast, String
 from sqlalchemy import func
 from datetime import date, datetime, timedelta
 from typing import Optional
+from urllib.parse import urlparse
 import io
 import os
 import tempfile
@@ -161,6 +162,61 @@ async def generate_unique_short_key(session: AsyncSession) -> str:
     raise RuntimeError("Failed to generate a unique short code after multiple attempts.")
 
 
+def is_valid_domain(hostname: str) -> bool:
+    labels = hostname.rstrip(".").split(".")
+    if len(labels) < 2:
+        return False
+
+    if len(labels[-1]) < 2 or not labels[-1].isalpha():
+        return False
+
+    for label in labels:
+        if not label or len(label) > 63:
+            return False
+        if label.startswith("-") or label.endswith("-"):
+            return False
+        if not all(char.isalnum() or char == "-" for char in label):
+            return False
+
+    return True
+
+
+def validate_original_url(original_url: str) -> str:
+    url = original_url.strip()
+    if not url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL cannot be empty",
+        )
+
+    parsed_url = urlparse(url)
+    if not parsed_url.scheme or not parsed_url.netloc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL must be valid and include scheme and host",
+        )
+
+    if parsed_url.scheme.lower() not in ("http", "https"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only http and https URLs are allowed",
+        )
+
+    if not parsed_url.hostname:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL must include a valid host",
+        )
+
+    if not is_valid_domain(parsed_url.hostname.lower()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="URL host must be a valid domain",
+        )
+
+    return url
+
+
 async def record_visit_background(
         short_key: str,
         ip_address: str | None,
@@ -198,7 +254,8 @@ async def shorten_url(
         request: Request,
         session: AsyncSession = Depends(get_db),
 ) -> LinkResponse:
-    link = await create_short_link(session, str(payload.original_url))
+    original_url = validate_original_url(payload.original_url)
+    link = await create_short_link(session, original_url)
     short_url = str(request.base_url).rstrip("/") + f"/{link.short_key}"
 
     return LinkResponse(
@@ -220,9 +277,10 @@ async def shorten_url_protected(
         current_user: User = Depends(get_current_user),
         session: AsyncSession = Depends(get_db),
 ) -> LinkResponse:
+    original_url = validate_original_url(payload.original_url)
     link = await create_short_link(
         session,
-        str(payload.original_url),
+        original_url,
         user_id=current_user.id
     )
     short_url = str(request.base_url).rstrip("/") + f"/{link.short_key}"

@@ -18,11 +18,14 @@ from services import create_short_link, generate_short_code, get_link_by_code, g
 from qr_generator import generate_simple_qr, generate_custom_color_qr, add_logo_to_qr, generate_qr_with_custom_params
 from routers.auth import get_current_user
 from models import User, Link, Visit
+from config import get_settings
 
 
 router = APIRouter(tags=["links"])
 SHORT_LINK_PREFIX = "/r"
 FRONTEND_NOT_FOUND_PATH = "/404"
+
+settings = get_settings()
 
 
 class LinkCreate(BaseModel):

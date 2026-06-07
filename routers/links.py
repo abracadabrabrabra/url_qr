@@ -21,6 +21,7 @@ from models import User, Link, Visit
 
 
 router = APIRouter(tags=["links"])
+SHORT_LINK_PREFIX = "/r"
 
 
 class LinkCreate(BaseModel):
@@ -108,6 +109,11 @@ def get_client_ip(request: Request) -> str | None:
         return real_ip
 
     return request.client.host if request.client else None
+
+
+def build_short_url(request: Request, short_key: str) -> str:
+    base_url = str(request.base_url).rstrip("/")
+    return f"{base_url}{SHORT_LINK_PREFIX}/{short_key}"
 
 
 def detect_device_type(user_agent: str | None) -> str | None:
@@ -251,7 +257,7 @@ async def shorten_url(
 ) -> LinkResponse:
     original_url = validate_original_url(payload.original_url)
     link = await create_short_link(session, original_url)
-    short_url = str(request.base_url).rstrip("/") + f"/{link.short_key}"
+    short_url = build_short_url(request, link.short_key)
 
     return LinkResponse(
         original_url=link.original_url,
@@ -278,7 +284,7 @@ async def shorten_url_protected(
         original_url,
         user_id=current_user.id
     )
-    short_url = str(request.base_url).rstrip("/") + f"/{link.short_key}"
+    short_url = build_short_url(request, link.short_key)
 
     return LinkResponse(
         original_url=link.original_url,
@@ -416,11 +422,9 @@ async def get_link_analytics(
     average_per_day = total_clicks // period_days
     previous_average_per_day = int(previous_metrics["total_clicks"]) // period_days
     last_click_at = current_metrics["last_click_at"]
-    base_url = str(request.base_url).rstrip("/")
-
     return LinkAnalyticsResponse(
         short_key=link.short_key,
-        short_url=f"{base_url}/{link.short_key}",
+        short_url=build_short_url(request, link.short_key),
         original_url=link.original_url,
         total_clicks=total_clicks,
         unique_clicks=unique_clicks,
@@ -520,13 +524,12 @@ async def get_user_links(
         .limit(limit)
     )
     links_with_clicks = result.all()
-    base_url = str(request.base_url).rstrip("/")
 
     return [
         LinkStatsResponse(
             original_url=link.original_url,
             short_code=link.short_key,
-            short_url=f"{base_url}/{link.short_key}",
+            short_url=build_short_url(request, link.short_key),
             user_id=link.user_id,
             clicks_count=int(clicks_count),
             created_at=str(link.created_at),
@@ -594,11 +597,10 @@ async def update_user_link(
         select(func.count(Visit.id)).where(Visit.short_key == new_short_key)
     )
 
-    base_url = str(request.base_url).rstrip("/")
     return LinkUpdateResponse(
         old_short_key=old_short_key,
         short_key=updated_link.short_key,
-        short_url=f"{base_url}/{updated_link.short_key}",
+        short_url=build_short_url(request, updated_link.short_key),
         original_url=updated_link.original_url,
         clicks_count=int(clicks_result.scalar_one()),
         created_at=updated_link.created_at.isoformat(),
@@ -752,7 +754,7 @@ async def get_qr_for_short_url(
 
 
 @router.get(
-    "/{code}",
+    f"{SHORT_LINK_PREFIX}/{{code}}",
     summary="Redirect by short code",
     responses={404: {"description": "Short code not found"}},
 )
@@ -762,9 +764,6 @@ async def redirect_to_original(
         background_tasks: BackgroundTasks,
         session: AsyncSession = Depends(get_db),
 ):
-    if code.startswith("api/"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invalid short code")
-
     link = await get_link_by_code(session, code)
 
     if link is None:
@@ -791,6 +790,6 @@ async def redirect_to_original(
         request.headers.get("referer"),
     )
 
-    print(f"Redirect: {code} -> {link.original_url}")
+    ##print(f"Redirect: {code} -> {link.original_url}")
 
     return RedirectResponse(url=link.original_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)

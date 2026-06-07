@@ -44,7 +44,7 @@
 - `GET /api/user/stats` - агрегированная статистика пользователя для dashboard
 - `PATCH /api/links/{code}` - генерация нового короткого кода без потери статистики
 - `DELETE /api/links/{code}` - мягкое удаление короткой ссылки пользователя
-- `GET /{code}` делает redirect на исходный URL
+- `GET /r/{code}` делает redirect на исходный URL
 - `GET /api/qr/{code}` - генерация черно-белого qr-кода для существующей короткой ссылки
 - `POST /api/qr/{code}/custom` - генерация кастомного qr-кода для существующей короткой ссылки
 - `GET /api/health` проверяет доступность сервиса
@@ -77,48 +77,86 @@ SMTP_FROM=noreply@yourservice.com
 
 ## Запуск через Docker
 
-1. Поднимите приложение и БД:
+1. Если используется frontend, сначала соберите Vite-приложение:
+
+```bash
+cd /home/myar/PycharmProjects/url_shortener_client
+npm run build
+```
+
+Nginx отдаёт готовую папку `dist` из frontend-проекта.
+
+2. Поднимите приложение, БД и Nginx:
 
 ```bash
 docker compose up --build
 ```
 
-2. Swagger будет доступен по адресу:
+3. Основной вход через Nginx:
 
 ```text
-http://localhost:8000/docs
-```
-
-## Локальный запуск без Docker
-
-Если Docker не нужен, можно запускать приложение отдельно, а БД поднять любым удобным способом.
-
-1. Создайте и активируйте виртуальное окружение:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-2. Установите зависимости:
-
-```bash
-pip install -r requirements.txt
-```
-
-3. Поднимите PostgreSQL и выполните ваш SQL-скрипт.
-
-4. Запустите сервер:
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+http://localhost
 ```
 
 Swagger будет доступен по адресу:
 
 ```text
-http://localhost:8000/docs
+http://localhost/docs
 ```
+
+Backend напрямую оставлен для отладки:
+
+```text
+http://localhost:8001/docs
+```
+
+## Nginx
+
+В проект добавлен Nginx как единая точка входа для frontend и backend.
+
+Что это дает:
+
+- frontend и backend открываются на одном origin `http://localhost`, поэтому меньше проблем с CORS, cookies и токенами
+- Vite `dist` отдается как статические файлы без запуска dev-сервера
+- `/api/...` и `/r/{code}` проксируются во внутренний контейнер FastAPI
+- короткие ссылки не конфликтуют с frontend routes вроде `/login`, `/dashboard`, `/links/...`
+- в production Nginx можно использовать для TLS/HTTPS, gzip/brotli, кеширования статики и reverse proxy
+
+Схема:
+
+```text
+Browser
+  |
+Nginx :80
+  |-- /, /login, /dashboard, /links/... -> frontend dist
+  |-- /api/...                          -> FastAPI app:8000
+  |-- /docs                             -> FastAPI app:8000
+  |-- /openapi.json                     -> FastAPI app:8000
+  |-- /r/{code}                         -> FastAPI redirect
+```
+
+Короткие ссылки вынесены под префикс `/r`, чтобы не конфликтовать с frontend routes:
+
+```text
+http://localhost/r/FnhXPE
+```
+
+Конфигурация Nginx находится в `nginx.conf`.
+
+Проверка после запуска:
+
+```bash
+curl http://localhost/api/health
+curl -I http://localhost/r/FnhXPE
+```
+
+Frontend должен обращаться к API относительными путями:
+
+```text
+/api/auth/login
+/api/user/links
+```
+
 
 ## Примеры запросов
 
@@ -275,7 +313,7 @@ curl -X POST "http://localhost:8000/api/shorten" ^
 {
   "original_url": "https://example.com/very/long/url",
   "short_code": "Ab3dE1",
-  "short_url": "http://localhost:8000/Ab3dE1"
+  "short_url": "http://localhost:8000/r/Ab3dE1"
 }
 ```
 
@@ -293,7 +331,7 @@ curl -X POST "http://localhost:8000/api/shorten/protected" ^
 {
   "original_url":"https://example.com/very/long/url",
   "short_code":"nXiI0r",
-  "short_url":"http://localhost:8000/nXiI0r",
+  "short_url":"http://localhost:8000/r/nXiI0r",
   "user_id":1
 }
 
@@ -357,7 +395,7 @@ curl -X GET "http://localhost:8000/api/user/links" -H "Authorization: Bearer <ac
   {
     "original_url":"https://very_long_url",
     "short_code":"6GjDtf",
-    "short_url":"http://localhost:8000/6GjDtf",
+    "short_url":"http://localhost:8000/r/6GjDtf",
     "user_id":1,
     "clicks_count":1,
     "created_at":"2026-05-28 08:36:47.579602",
@@ -385,7 +423,7 @@ curl -X PATCH "http://localhost:8000/api/links/nXiI0r" ^
 {
   "old_short_key":"nXiI0r",
   "short_key":"Ab3dE1",
-  "short_url":"http://localhost:8000/Ab3dE1",
+  "short_url":"http://localhost:8000/r/Ab3dE1",
   "original_url":"https://example.com",
   "clicks_count":342,
   "created_at":"2026-05-20T14:29:03",
@@ -471,7 +509,7 @@ curl -X GET "http://localhost:8000/api/links/nXiI0r/analytics?date_from=2026-05-
 ```json
 {
   "short_key":"nXiI0r",
-  "short_url":"http://localhost:8000/nXiI0r",
+  "short_url":"http://localhost:8000/r/nXiI0r",
   "original_url":"https://example.com",
   "total_clicks":342,
   "unique_clicks":287,
@@ -501,7 +539,7 @@ curl -X GET "http://localhost:8000/api/links/nXiI0r/analytics?date_from=2026-05-
 ### Редирект по короткому коду
 
 ```bash
-curl -i "http://localhost:8000/Ab3dE1"
+curl -i "http://localhost:8000/r/Ab3dE1"
 ```
 
 Ожидаемый ответ:
@@ -518,7 +556,7 @@ location: https://example.com/very/long/url
 ### Ошибка при несуществующем или неактивном коде
 
 ```bash
-curl -i "http://localhost:8000/unknown"
+curl -i "http://localhost:8000/r/unknown"
 ```
 
 Ожидаемый ответ:
@@ -692,6 +730,45 @@ curl: (22) The requested URL returned error: 400
 - минимальные зависимости - не требует дополнительных библиотек
 - встроенная цветовая кастомизация
 
+## Нагрузочное тестирование редиректа
+
+Для проверки частых переходов по короткой ссылке использовался `hey`.
+
+Команда для spike-теста через Nginx:
+
+```bash
+hey -disable-redirects -n 2000 -c 2000 http://127.0.0.1/r/FnhXPE
+```
+
+Параметры:
+
+- `-n 2000` - всего 2000 запросов
+- `-c 2000` - до 2000 одновременных запросов
+- `-disable-redirects` - не переходить на внешний сайт после получения `307`
+
+Зафиксированный локальный результат после добавления Nginx и запуска FastAPI с 4 workers:
+
+```text
+Status code distribution:
+  [307] 2000 responses
+
+Requests/sec: 1187.7159
+Average:      0.9959 sec
+p50:          0.9903 sec
+p95:          1.5648 sec
+p99:          1.6398 sec
+```
+
+Итог: локальный spike на 2000 одновременных редиректов прошёл без ошибок. Тест выполнялся локально, поэтому результат зависит от машины, Docker, PostgreSQL и текущей нагрузки системы.
+
+Как читать результат:
+
+- `Status code distribution: [307] 2000 responses` означает, что все 2000 запросов получили корректный redirect
+- отсутствие `Error distribution` означает, что во время теста не было `EOF`, timeout или отказов соединения
+- `Requests/sec` показывает пропускную способность на этой машине, но это не универсальная production-цифра
+- `p95` и `p99` важнее среднего времени, потому что показывают задержку для самых медленных запросов
+- если `/api/health` работает сильно быстрее, чем `/r/{code}`, значит узкое место находится не в Nginx, а в логике редиректа: запрос к БД, запись визита, пул соединений или PostgreSQL
+
 ## Основные файлы
 
 - `main.py` создает приложение FastAPI и подключает роутеры
@@ -700,6 +777,7 @@ curl: (22) The requested URL returned error: 400
 - `models.py` описывает ORM-модели `Link` и `User` под исходные таблицы `links` и `users`
 - `docker-compose.yml` поднимает приложение и PostgreSQL в контейнерах
 - `Dockerfile` собирает контейнер приложения
+- `nginx.conf` настраивает маршрутизацию frontend/API/редиректов через Nginx
 - `services.py` содержит бизнес-логику создания короткой ссылки
 - `auth_services.py` содержит логику работы с JWT токенами (создание, отзыв, хэширование и т.д.)
 - `routers/links.py` содержит HTTP-эндпоинты

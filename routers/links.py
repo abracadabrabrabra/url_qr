@@ -22,6 +22,7 @@ from models import User, Link, Visit
 
 router = APIRouter(tags=["links"])
 SHORT_LINK_PREFIX = "/r"
+FRONTEND_NOT_FOUND_PATH = "/404"
 
 
 class LinkCreate(BaseModel):
@@ -756,7 +757,10 @@ async def get_qr_for_short_url(
 @router.get(
     f"{SHORT_LINK_PREFIX}/{{code}}",
     summary="Redirect by short code",
-    responses={404: {"description": "Short code not found"}},
+    responses={
+        302: {"description": "Redirect to frontend 404 page if short code is missing or expired"},
+        307: {"description": "Redirect to original URL"},
+    },
 )
 async def redirect_to_original(
         code: str,
@@ -765,21 +769,11 @@ async def redirect_to_original(
         session: AsyncSession = Depends(get_db),
 ):
     link = await get_link_by_code(session, code)
-
     if link is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Short code not found")
-
-    if not link.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="This short link has been deactivated"
-        )
+        return RedirectResponse(url=FRONTEND_NOT_FOUND_PATH, status_code=status.HTTP_302_FOUND)
 
     if link.expires_at and link.expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_410_GONE,
-            detail="This short link has expired"
-        )
+        return RedirectResponse(url=FRONTEND_NOT_FOUND_PATH, status_code=status.HTTP_302_FOUND)
 
     user_agent = request.headers.get("user-agent")
     background_tasks.add_task(
@@ -789,7 +783,5 @@ async def redirect_to_original(
         user_agent,
         request.headers.get("referer"),
     )
-
-    ##print(f"Redirect: {code} -> {link.original_url}")
 
     return RedirectResponse(url=link.original_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)

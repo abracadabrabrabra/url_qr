@@ -73,6 +73,7 @@ SMTP_PORT=587
 SMTP_USER=your_email@gmail.com
 SMTP_PASSWORD=your_app_password
 SMTP_FROM=noreply@yourservice.com
+FRONTEND_DIST_PATH=../url_shortener_client/dist
 ```
 
 ## Запуск через Docker
@@ -80,11 +81,17 @@ SMTP_FROM=noreply@yourservice.com
 1. Если используется frontend, сначала соберите Vite-приложение:
 
 ```bash
-cd /home/myar/PycharmProjects/url_shortener_client
+cd ../url_shortener_client
 npm run build
 ```
 
 Nginx отдаёт готовую папку `dist` из frontend-проекта.
+Путь до этой папки задаётся в `.env` через `FRONTEND_DIST_PATH`.
+Если frontend лежит в другом месте, укажите свой путь, например:
+
+```env
+FRONTEND_DIST_PATH=/absolute/path/to/frontend/dist
+```
 
 2. Поднимите приложение, БД и Nginx:
 

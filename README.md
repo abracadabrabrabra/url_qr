@@ -794,3 +794,5 @@ p99:          1.6398 sec
 - `routers/auth.py` содержит HTTP-эндпоинты авторизации
 - `qr_generator.py` содержит функции для генерации qr-кодов(простых, с кастомными цветами) и для наложения логотипа
 - `static_data/logo.png` стандартный логотип, накладываемый на qr-коды
+
+[Ссылка на frontend](https://github.com/abracadabrabrabra/url_shortener_client)

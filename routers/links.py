@@ -658,6 +658,7 @@ async def delete_user_link(
 )
 async def get_custom_qr_for_short_url(
         code: str,
+        request: Request,
         session: AsyncSession = Depends(get_db),
         dark_color: Optional[str] = Form(None),
         light_color: Optional[str] = Form(None),
@@ -714,8 +715,9 @@ async def get_custom_qr_for_short_url(
             logo_path = default_logo_path
 
     try:
+        short_url = build_short_url(request, link.short_key)
         qr_bytes = generate_qr_with_custom_params(
-            url=link.original_url,
+            url=short_url,
             scale=scale,
             dark_color=dark_color,
             light_color=light_color,
@@ -741,11 +743,13 @@ async def get_custom_qr_for_short_url(
 )
 async def get_qr_for_short_url(
         code: str,
+        request: Request,
         scale: int = Query(10, ge=3, le=20, description="QR code size (3-20)"),
         session: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     link = await get_active_link_or_404(session, code)
-    qr_bytes = generate_simple_qr(link.original_url, scale=scale)
+    short_url = build_short_url(request, link.short_key)
+    qr_bytes = generate_simple_qr(short_url, scale=scale)
 
     return StreamingResponse(
         io.BytesIO(qr_bytes),

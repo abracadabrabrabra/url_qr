@@ -587,6 +587,9 @@ curl "http://localhost:8000/api/health"
 
 ### Генерация черно-белого qr по короткому коду
 
+QR-код содержит короткую ссылку вида `/r/{code}`, а не исходный `original_url`.
+Поэтому сканирование QR проходит через редирект сервиса и учитывается в общей статистике переходов.
+
 ```cmd
 curl -X POST "http://localhost:8000/api/qr/example_short_code/custom" --output filepath --fail
 ```
